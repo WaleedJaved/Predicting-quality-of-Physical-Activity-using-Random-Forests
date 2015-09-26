@@ -1,0 +1,99 @@
+---
+title: "Predicting Quality of Physical Activity using Random Forests"
+author: "Waleed Javed"
+date: "Monday, September 21, 2015"
+output: html_document
+---
+
+The data was downloaded from the Course website and after being read into R, some of the columns were visualized within R Studio. It seemed that many of the columns were summary statistics i.e. var, std and etc. Then, all such columns were removed from the data set since these columns had many missing values and also any value hidden in them could be obtained from the "raw data". 
+
+```{r,results="hide"}
+initialdata <- read.csv("D:/Studies/Data Science Specialization/Practical Machine Learning/Project/pml-training.csv")
+View(initialdata)
+usefuldata = initialdata[,-1]
+names(usefuldata)
+notUsefulColumns = c(1:6,11:35,48:58,68:82,86:111,124:149)
+usefuldata = usefuldata[,-notUsefulColumns]
+View(usefuldata)
+```
+
+Some exploratory analysis would have been important to see if any variables were skewed and needed standardizing. But to save time, it was decided to build a model first and return and pre-process the data to improve the accuracy only if needed.
+
+The model was built using caret package in R. For cross-validation, it was decided that the training set would be further divided into 70% for training and 30% for validation. This was also done so that the inner cross-validation within the train() function in caret could be turned off to save on training time that seemed too long otherwise. Parallel processing was also employed while training to prevent the computer from "freezing". 
+
+```{r,results="hide"}
+library(caret)
+
+#actual model
+#divide the dataset into training and validation data sets
+intrain = createDataPartition(y=usefuldata$classe,list=F,p=0.7)
+traindata = usefuldata[intrain,]
+validdata = usefuldata[-intrain,]
+```
+
+Further, to save even more on training time by reducing the number of features, Principal component analysis was employed purely for dimention reduction, and only features that captured 80% of the variance were kept.
+
+```{r}
+pcaobj = preProcess(traindata[,-50],method="pca",thresh=0.8)
+trainpca = predict(pcaobj,traindata[,-50])
+```
+
+Then the model was trained on the values calculated using PCA. The method used was Random Forests because it did not require the data to follow any particular distribution and seemed quite suitable for such numerical data. 
+```{r}
+# training model using parallel processing and turning off 
+# cross-validation
+library(parallel, quietly=T)
+library(doParallel, quietly=T)
+
+fitControl    <- trainControl(method = "none")
+tgrid           <- expand.grid(mtry=c(6)) 
+
+cluster   <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+model2 = train(traindata$classe ~.,method='rf',data=trainpca,trControl=
+                   fitControl,tuneGrid=tgrid)
+stopCluster(cluster)
+```
+
+Then, the model was used to predict the classe variable for the validation data set by first calculating the values using the same PCA employed for the training set. A confusion matrix was built as can be seen below. The accuracy of 95% was good enough and it was decided not to repeat any training or pre-process the data any further. Due to time constraints, no further cross-validation was done.
+
+```{r}
+validpca = predict(pcaobj,validdata[,-50])
+pred = predict(model2,validpca)
+conMatrix = confusionMatrix(pred,validdata$classe)
+conMatrix
+```
+
+
+```{r,echo=FALSE,eval=FALSE}
+testdata <- read.csv("D:/Studies/Data Science Specialization/Practical Machine Learning/Project/pml-testing.csv")
+
+
+testusefuldata = testdata[,-1]
+names(testusefuldata)
+summary(testusefuldata)
+notUsefulColumns = c(1:6,11:35,48:58,
+                     68:82,86:111,124:149,159)
+testusefuldata = testusefuldata[,-notUsefulColumns]
+
+#apply pca to test data:
+testpca = predict(pcaobj,testusefuldata)
+#make prediciton for test data:
+predtest = predict(model2,testpca)
+predtest
+
+#converting into text files:
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(predtest)
+```
+
+
+
+
+
